@@ -1,0 +1,113 @@
+networks:
+  supply_chain_net:
+    driver: bridge
+
+volumes:
+  rocketmq_namesrv_data:
+  rocketmq_broker_data:
+  qdrant_data:
+  couchdb_data:
+
+services:
+  # --- ROCKETMQ NAMESERVER ---
+  namesrv:
+    image: apache/rocketmq:5.1.4
+    container_name: rmqnamesrv
+    ports:
+      - "9876:9876"
+    command: sh mqnamesrv
+    networks:
+      - supply_chain_net
+
+  # --- ROCKETMQ BROKER ---
+  broker:
+    image: apache/rocketmq:5.1.4
+    container_name: rmqbroker
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+    environment:
+      - NAMESRV_ADDR=namesrv:9876
+    command: sh mqbroker -c /etc/rocketmq/broker.conf
+    volumes:
+      - rocketmq_broker_data:/root/store
+    depends_on:
+      - namesrv
+    networks:
+      - supply_chain_net
+
+  # --- APACHE FLINK JOBMANAGER ---
+  jobmanager:
+    image: flink:1.19-java17
+    container_name: flink-jobmanager
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+    networks:
+      - supply_chain_net
+
+  # --- APACHE FLINK TASKMANAGER ---
+  taskmanager:
+    image: flink:1.19-java17
+    container_name: flink-taskmanager
+    depends_on:
+      - jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+    networks:
+      - supply_chain_net
+
+  # --- APACHE COUCHDB (OFFLINE-FIRST GATEWAY) ---
+  couchdb:
+    image: couchdb:3.3.3
+    container_name: couchdb-gateway
+    ports:
+      - "5984:5984"
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=password
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+    networks:
+      - supply_chain_net
+
+  # --- QDRANT VECTOR DATABASE (LOCAL RAG) ---
+  qdrant:
+    image: qdrant/qdrant:v1.9.0
+    container_name: qdrant-vector-db
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - supply_chain_net
+
+  # --- vLLM LOCAL INFERENCE SERVER (AIR-GAPPED AI) ---
+  vllm-server:
+    image: vllm/vllm-openai:v0.4.2
+    container_name: vllm-inference-engine
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: --model meta-llama/Meta-Llama-3.1-8B-Instruct --host 0.0.0.0 --port 8000 --max-model-len 4096
+    networks:
+      - supply_chain_net

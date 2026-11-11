@@ -1,0 +1,6 @@
+p, logistics_manager, carrier_alpha, /api/v1/shipment/reroute, POST
+p, auditor, carrier_alpha, /api/v1/shipment/reroute, POST
+p, admin, tenant_default, /api/v1/shipment/reroute, POST
+
+g, driver_john, logistics_manager, carrier_alpha
+g, audit_mary, auditor, carrier_alpha
